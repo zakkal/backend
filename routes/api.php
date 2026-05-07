@@ -37,6 +37,7 @@ Route::middleware('jwt')->group(function () {
 
     // --- FITUR SOSIAL (LIKE & COMMENT) ---
     // Like / Unlike Opportunity
+    Route::get('opportunities/{id}/likes', [OpportunityController::class, 'getLikeStatus']);
     Route::post('opportunities/{id}/like', [OpportunityController::class, 'toggleLike']);
     
     // Kirim Komentar (Bisa untuk komentar baru atau balas komentar/reply)

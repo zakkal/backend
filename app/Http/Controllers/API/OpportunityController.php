@@ -76,22 +76,22 @@ class OpportunityController extends Controller
             'data'    => $opportunity->load(['creator.organization'])
         ], 201);
 
-        // ... kode validator (tambahkan 'categories' => 'required|array') ...
+            // ... kode validator (tambahkan 'categories' => 'required|array') ...
 
-$opportunity = Opportunity::create([
-    // ... field yang sudah ada ...
-]);
+        $opportunity = Opportunity::create([
+        // ... field yang sudah ada ...
+        ]);
 
-// Sinkronkan kategori yang dipilih (isinya array ID kategori, misal [1, 2])
-if ($request->has('categories')) {
-    $opportunity->categories()->sync($request->categories);
-}
+        // Sinkronkan kategori yang dipilih (isinya array ID kategori, misal [1, 2])
+        if ($request->has('categories')) {
+            $opportunity->categories()->sync($request->categories);
+        }
 
-return response()->json([
-    'success' => true,
-    'message' => 'Lowongan dan kategori berhasil disimpan',
-    'data' => $opportunity->load('categories')
-], 201);
+        return response()->json([
+            'success' => true,
+            'message' => 'Lowongan dan kategori berhasil disimpan',
+            'data' => $opportunity->load('categories')
+        ], 201);
     }
 
     // 3. Detail Lowongan (Termasuk komentar dan balasan)
@@ -183,6 +183,35 @@ return response()->json([
             'success' => true, 
             'data'    => $comment->load('user:id,name,foto_profil')
         ], 201);
+    }
+
+    // 8. Ambil Komentar Berdasarkan Opportunity ID
+    public function getComments($id)
+    {
+        $comments = Comment::with(['user:id,name,foto_profil', 'replies.user:id,name,foto_profil'])
+            ->where('opportunity_id', $id)
+            ->whereNull('parent_id') // Hanya ambil komentar utama, balasan masuk ke 'replies'
+            ->latest()
+            ->paginate(10);
+
+        return response()->json([
+            'success' => true,
+            'data' => $comments
+        ], 200);
+    }
+
+    // 9. Cek Status Like User Saat Ini
+    public function getLikeStatus($id)
+    {
+        $userId = Auth::id();
+        $isLiked = Like::where('user_id', $userId)->where('opportunity_id', $id)->exists();
+        $totalLikes = Like::where('opportunity_id', $id)->count();
+
+        return response()->json([
+            'success' => true,
+            'is_liked' => $isLiked,
+            'total' => $totalLikes
+        ], 200);
     }
     // Tambahkan di OpportunityController
 public function getCategories()
