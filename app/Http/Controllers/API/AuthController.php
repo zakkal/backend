@@ -31,7 +31,7 @@ class AuthController extends Controller
             // PENTING: Tambahkan ->stateless() agar Socialite tidak mencari session/cookie
             // Gunakan userFromToken untuk ID Token yang dikirim Flutter
             $googleUser = Socialite::driver('google')->stateless()->userFromToken($request->token);
-            
+
             $user = User::where('email', $googleUser->getEmail())->first();
             $isNewUser = false;
 
@@ -55,19 +55,18 @@ class AuthController extends Controller
             return response()->json([
                 'status'  => 'success',
                 'message' => 'Login Google berhasil',
-                'is_new_user' => $isNewUser, 
+                'is_new_user' => $isNewUser,
                 'data'    => [
                     'user'  => $user->load('organization'),
                     'token' => $this->respondWithToken($token)
                 ]
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'status'  => 'error',
                 'message' => 'Gagal autentikasi Google',
                 // Pesan error ini membantu debugging jika token salah/expired
-                'error'   => $e->getMessage() 
+                'error'   => $e->getMessage()
             ], 401);
         }
     }
@@ -96,7 +95,7 @@ class AuthController extends Controller
             'email'       => $request->email,
             'password'    => Hash::make($request->password),
             'role'        => $request->role,
-            'is_verified' => $isVerified, 
+            'is_verified' => $isVerified,
         ]);
 
         if ($user->role === 'admin') {
@@ -107,8 +106,8 @@ class AuthController extends Controller
             ]);
         }
 
-        $message = ($user->role === 'admin') 
-            ? 'Registrasi Admin berhasil. Mohon tunggu verifikasi Programmer.' 
+        $message = ($user->role === 'admin')
+            ? 'Registrasi Admin berhasil. Mohon tunggu verifikasi Programmer.'
             : 'Registrasi User berhasil. Silahkan login.';
 
         return response()->json([
@@ -142,7 +141,6 @@ class AuthController extends Controller
                     'message' => 'Akun Admin Anda belum diverifikasi oleh Programmer.'
                 ], 403);
             }
-
         } catch (JWTException $e) {
             return response()->json([
                 'status'  => 'error',
@@ -213,8 +211,8 @@ class AuthController extends Controller
         }
 
         $notifications = Notification::where('user_id', auth()->id())
-                            ->orderBy('created_at', 'desc')
-                            ->get();
+            ->orderBy('created_at', 'desc')
+            ->get();
 
         return response()->json([
             'status' => 'success',

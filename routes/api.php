@@ -1,61 +1,71 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\ProductController;
-use App\Http\Controllers\Api\OrganizationController;
-use App\Http\Controllers\Api\OpportunityController;
-use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\API\AuthController; // Sesuaikan dengan namespace di controller
+use App\Http\Controllers\API\ProductController;
+use App\Http\Controllers\API\OrganizationController;
+use App\Http\Controllers\API\OpportunityController;
+use App\Http\Controllers\API\NotificationController;
 
-// 1. ROUTE PUBLIK (Bisa diakses tanpa login)
-Route::post('auth/register', [AuthController::class, 'register']);
-Route::post('auth/login', [AuthController::class, 'login']);
-Route::post('auth/google', [AuthController::class, 'googleLogin']);
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+*/
 
+// --- 1. ROUTE PUBLIK ---
+Route::prefix('auth')->group(function () {
+    Route::post('register', [AuthController::class, 'register']);
+    Route::post('login', [AuthController::class, 'login']);
+    Route::post('google', [AuthController::class, 'googleLogin']);
+});
+
+// Lowongan (Akses Publik)
 Route::get('opportunities', [OpportunityController::class, 'index']);
 Route::get('opportunities/{id}', [OpportunityController::class, 'show']);
-
-// Endpoint untuk melihat komentar (publik bisa baca komentar)
 Route::get('opportunities/{id}/comments', [OpportunityController::class, 'getComments']);
+Route::get('categories', [OpportunityController::class, 'getCategories']);
 
 
-// 2. ROUTE TERPROTEKSI (Wajib Login / Pakai Token JWT)
+// --- 2. ROUTE TERPROTEKSI (JWT) ---
+// Pastikan middleware 'jwt' sudah terdaftar di Kernel.php
 Route::middleware('jwt')->group(function () {
     
-    // Auth
-    Route::post('auth/logout', [AuthController::class, 'logout']);
-    Route::get('auth/me', [AuthController::class, 'me']);
+    // Profil & Logout
+    Route::prefix('auth')->group(function () {
+        Route::post('logout', [AuthController::class, 'logout']);
+        Route::get('me', [AuthController::class, 'me']);
+    });
     
-    // Organization Profile
-    Route::get('organization', [OrganizationController::class, 'show']);
-    Route::post('organization/update', [OrganizationController::class, 'update']); 
+    // Profil Organisasi
+    Route::prefix('organization')->group(function () {
+        Route::get('/', [OrganizationController::class, 'show']);
+        Route::post('update', [OrganizationController::class, 'update']); 
+    });
 
-    // CRUD Opportunities
+    // Managemen Opportunities (Hanya Admin/User Login)
     Route::post('opportunities', [OpportunityController::class, 'store']);
-    Route::post('opportunities/{id}', [OpportunityController::class, 'update']); 
+    Route::post('opportunities/{id}', [OpportunityController::class, 'update']); // Gunakan POST untuk update jika ada upload foto
     Route::delete('opportunities/{id}', [OpportunityController::class, 'destroy']);
 
-    // --- FITUR SOSIAL (LIKE & COMMENT) ---
-    // Like / Unlike Opportunity
+    // Fitur Sosial
     Route::get('opportunities/{id}/likes', [OpportunityController::class, 'getLikeStatus']);
     Route::post('opportunities/{id}/like', [OpportunityController::class, 'toggleLike']);
-    
-    // Kirim Komentar (Bisa untuk komentar baru atau balas komentar/reply)
     Route::post('opportunities/{id}/comments', [OpportunityController::class, 'storeComment']);
 
     // Notifikasi
-    Route::get('notifications', [NotificationController::class, 'index']);
-    Route::post('notifications/{id}/read', [NotificationController::class, 'markAsRead']);
-    Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::post('{id}/read', [NotificationController::class, 'markAsRead']);
+        Route::post('read-all', [NotificationController::class, 'markAllAsRead']);
+    });
 
-    // Super Admin
-    Route::get('superadmin/pending-admins', [AuthController::class, 'getPendingAdmins']);
-    Route::post('superadmin/verify-admin/{id}', [AuthController::class, 'approveAdmin']);
+    // Fitur Super Admin (Verifikasi)
+    Route::prefix('superadmin')->group(function () {
+        Route::get('pending-admins', [AuthController::class, 'getPendingAdmins']);
+        Route::post('verify-admin/{id}', [AuthController::class, 'approveAdmin']);
+    });
 
-    // Lain-lain
+    // Resource Lainnya
     Route::apiResource('products', ProductController::class);
-
-    // Di bagian publik (tanpa login)
-Route::get('categories', [OpportunityController::class, 'getCategories']);
-
 });

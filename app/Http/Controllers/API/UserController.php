@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
+/**
+ * UserController handles user profile updates and other user-related actions.
+ */
 class UserController extends Controller
 {
     /**
