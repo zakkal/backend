@@ -160,7 +160,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 6. Fitur Like/Unlike + Notifikasi
+     * 6. Fitur Like/Unlike + Notifikasi (Fixed Column Names)
      */
     public function toggleLike($id)
     {
@@ -181,13 +181,12 @@ class OpportunityController extends Controller
 
             Like::create(['user_id' => $userId, 'opportunity_id' => $id]);
 
-            // Kirim Notifikasi ke Pemilik
+            // Kirim Notifikasi ke Pemilik (Menggunakan kolom judul & isi)
             if ($opportunity->created_by != $userId) {
                 Notification::create([
                     'user_id' => $opportunity->created_by,
-                    'from_user_id' => $userId,
-                    'type' => 'like',
-                    'message' => Auth::user()->name . ' menyukai lowongan Anda.',
+                    'judul'   => 'Like Baru!',
+                    'isi'     => Auth::user()->name . ' menyukai lowongan Anda: ' . $opportunity->judul,
                     'is_read' => false
                 ]);
             }
@@ -199,7 +198,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 7. Simpan Komentar + Notifikasi
+     * 7. Simpan Komentar + Notifikasi (Fixed Column Names)
      */
     public function storeComment(Request $request, $id)
     {
@@ -222,13 +221,12 @@ class OpportunityController extends Controller
                 'parent_id'      => $request->parent_id
             ]);
 
-            // Kirim Notifikasi ke Pemilik
+            // Kirim Notifikasi ke Pemilik (Menggunakan kolom judul & isi)
             if ($opportunity->created_by != Auth::id()) {
                 Notification::create([
                     'user_id' => $opportunity->created_by,
-                    'from_user_id' => Auth::id(),
-                    'type' => 'comment',
-                    'message' => Auth::user()->name . ' berkomentar di lowongan Anda.',
+                    'judul'   => 'Komentar Baru!',
+                    'isi'     => Auth::user()->name . ' berkomentar di lowongan Anda.',
                     'is_read' => false
                 ]);
             }
@@ -240,7 +238,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 8. Ambil Komentar (Fix Error 500 temanmu)
+     * 8. Ambil Komentar
      */
     public function getComments($id)
     {
