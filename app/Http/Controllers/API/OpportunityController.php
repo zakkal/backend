@@ -11,9 +11,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
+use Exception;
 
 class OpportunityController extends Controller
 {
+    /**
+     * 1. Menampilkan semua lowongan yang statusnya 'open'
+     */
     public function index()
     {
         $opportunities = Opportunity::with(['creator.organization', 'organization', 'categories'])
@@ -25,6 +29,9 @@ class OpportunityController extends Controller
         return response()->json(['success' => true, 'data' => $opportunities], 200);
     }
 
+    /**
+     * 2. Membuat lowongan baru
+     */
     public function store(Request $request)
     {
         $user = Auth::user();
@@ -46,45 +53,51 @@ class OpportunityController extends Controller
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        // Logic: Jika organization_id tidak dikirim, ambil dari profile user login
         $orgId = $request->organization_id ?? $user->organization_id;
 
         if (!$orgId) {
             return response()->json(['success' => false, 'message' => 'User tidak terhubung ke organisasi manapun.'], 403);
         }
 
-        $path = null;
-        if ($request->hasFile('foto')) {
-            $path = $request->file('foto')->store('opportunities', 'public');
+        try {
+            $path = null;
+            if ($request->hasFile('foto')) {
+                $path = $request->file('foto')->store('opportunities', 'public');
+            }
+
+            $opportunity = Opportunity::create([
+                'organization_id' => $orgId,
+                'user_id'         => $user->id, 
+                'created_by'      => $user->id, 
+                'judul'           => $request->judul,
+                'deskripsi'       => $request->deskripsi,
+                'lokasi'          => $request->lokasi,
+                'maps_url'        => $request->maps_url,
+                'foto'            => $path,
+                'tipe'            => $request->tipe,
+                'tanggal_mulai'   => $request->tanggal_mulai,
+                'tanggal_selesai' => $request->tanggal_selesai,
+                'kuota'           => $request->kuota,
+                'status'          => 'open',
+            ]);
+
+            if ($request->has('categories')) {
+                $opportunity->categories()->sync($request->categories);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Lowongan berhasil dibuat',
+                'data'    => $opportunity->load(['creator.organization', 'categories'])
+            ], 201);
+        } catch (Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Gagal membuat lowongan', 'error' => $e->getMessage()], 500);
         }
-
-        $opportunity = Opportunity::create([
-            'organization_id' => $orgId,
-            'user_id'         => $user->id, 
-            'created_by'      => $user->id, 
-            'judul'           => $request->judul,
-            'deskripsi'       => $request->deskripsi,
-            'lokasi'          => $request->lokasi,
-            'maps_url'        => $request->maps_url,
-            'foto'            => $path,
-            'tipe'            => $request->tipe,
-            'tanggal_mulai'   => $request->tanggal_mulai,
-            'tanggal_selesai' => $request->tanggal_selesai,
-            'kuota'           => $request->kuota,
-            'status'          => 'open',
-        ]);
-
-        if ($request->has('categories')) {
-            $opportunity->categories()->sync($request->categories);
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Lowongan berhasil dibuat',
-            'data'    => $opportunity->load(['creator.organization', 'categories'])
-        ], 201);
     }
 
+    /**
+     * 3. Detail lowongan beserta komentar dan reply
+     */
     public function show($id)
     {
         $opportunity = Opportunity::with([
@@ -104,39 +117,122 @@ class OpportunityController extends Controller
         return response()->json(['success' => true, 'data' => $opportunity], 200);
     }
 
-    public function toggleLike($id)
+    /**
+     * 4. Update lowongan
+     */
+    public function update(Request $request, $id)
     {
-        $userId = Auth::id();
-        $like = Like::where('user_id', $userId)->where('opportunity_id', $id)->first();
-
-        if ($like) {
-            $like->delete();
-            return response()->json(['success' => true, 'message' => 'Unliked', 'is_liked' => false]);
+        $opportunity = Opportunity::findOrFail($id);
+        
+        // Proteksi: Hanya pembuat yang bisa edit
+        if ($opportunity->created_by != Auth::id()) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
         }
 
-        Like::create(['user_id' => $userId, 'opportunity_id' => $id]);
-        return response()->json(['success' => true, 'message' => 'Liked', 'is_liked' => true], 201);
+        if ($request->hasFile('foto')) {
+            if ($opportunity->foto) {
+                Storage::disk('public')->delete($opportunity->foto);
+            }
+            $opportunity->foto = $request->file('foto')->store('opportunities', 'public');
+        }
+
+        $opportunity->update($request->except(['foto', 'categories']));
+
+        if ($request->has('categories')) {
+            $opportunity->categories()->sync($request->categories);
+        }
+
+        return response()->json(['success' => true, 'message' => 'Lowongan berhasil diupdate', 'data' => $opportunity]);
     }
 
+    /**
+     * 5. Hapus lowongan
+     */
+    public function destroy($id)
+    {
+        $opportunity = Opportunity::findOrFail($id);
+        if ($opportunity->created_by != Auth::id()) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        if ($opportunity->foto) {
+            Storage::disk('public')->delete($opportunity->foto);
+        }
+
+        $opportunity->delete();
+        return response()->json(['success' => true, 'message' => 'Lowongan berhasil dihapus']);
+    }
+
+    /**
+     * 6. Fitur Like/Unlike
+     */
+    public function toggleLike($id)
+    {
+        try {
+            $userId = Auth::id();
+            $opportunity = Opportunity::find($id);
+            
+            if (!$opportunity) {
+                return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+            }
+
+            $like = Like::where('user_id', $userId)->where('opportunity_id', $id)->first();
+
+            if ($like) {
+                $like->delete();
+                return response()->json(['success' => true, 'message' => 'Unliked', 'is_liked' => false]);
+            }
+
+            Like::create(['user_id' => $userId, 'opportunity_id' => $id]);
+            return response()->json(['success' => true, 'message' => 'Liked', 'is_liked' => true], 201);
+        } catch (Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Server Error', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * 7. Cek Status Like User Login
+     */
     public function getLikeStatus($id)
     {
         $isLiked = Like::where('user_id', Auth::id())->where('opportunity_id', $id)->exists();
         return response()->json(['success' => true, 'is_liked' => $isLiked]);
     }
 
+    /**
+     * 8. Simpan Komentar (Beserta Reply jika ada parent_id)
+     */
     public function storeComment(Request $request, $id)
     {
-        $request->validate(['comment' => 'required|string']);
-
-        $comment = Comment::create([
-            'user_id'        => Auth::id(),
-            'opportunity_id' => $id, 
-            'comment'        => $request->comment,
-            'parent_id'      => $request->parent_id
+        $validator = Validator::make($request->all(), [
+            'comment' => 'required|string',
+            'parent_id' => 'nullable|exists:comments,id'
         ]);
 
-        return response()->json(['success' => true, 'data' => $comment->load('user:id,name,foto_profil')], 201);
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        try {
+            $comment = Comment::create([
+                'user_id'        => Auth::id(),
+                'opportunity_id' => $id, 
+                'comment'        => $request->comment,
+                'parent_id'      => $request->parent_id
+            ]);
+
+            return response()->json(['success' => true, 'data' => $comment->load('user:id,name,foto_profil')], 201);
+        } catch (Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Gagal kirim komentar', 'error' => $e->getMessage()], 500);
+        }
     }
-    
-    // ... method lainnya (update, destroy, getComments, getCategories) tetap sama
+
+    /**
+     * 9. Ambil daftar kategori untuk dropdown di Flutter
+     */
+    public function getCategories()
+    {
+        $categories = Category::all();
+        return response()->json(['success' => true, 'data' => $categories]);
+    }
 }
