@@ -265,11 +265,20 @@ class OpportunityController extends Controller
     /**
      * 9. Lain-lain
      */
-    public function getLikeStatus($id)
-    {
-        $isLiked = Like::where('user_id', Auth::id())->where('opportunity_id', $id)->exists();
-        return response()->json(['success' => true, 'is_liked' => $isLiked]);
-    }
+   public function getLikeStatus($id)
+{
+    // Cek apakah user ini sudah like atau belum
+    $isLiked = Like::where('user_id', Auth::id())->where('opportunity_id', $id)->exists();
+    
+    // 🔥 TAMBAHKAN BARIS INI: Hitung total like untuk opportunity ini
+    $total = Like::where('opportunity_id', $id)->count();
+
+    return response()->json([
+        'success' => true, 
+        'is_liked' => $isLiked,
+        'total' => $total // Sekarang $total tidak akan merah lagi
+    ]);
+}
 
     public function getCategories()
     {
