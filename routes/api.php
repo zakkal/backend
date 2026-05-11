@@ -1,11 +1,12 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\API\AuthController; // Sesuaikan dengan namespace di controller
+use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\ProductController;
 use App\Http\Controllers\API\OrganizationController;
 use App\Http\Controllers\API\OpportunityController;
 use App\Http\Controllers\API\NotificationController;
+use App\Http\Controllers\API\ChatController; // Tambahan Import
 
 /*
 |--------------------------------------------------------------------------
@@ -28,7 +29,6 @@ Route::get('categories', [OpportunityController::class, 'getCategories']);
 
 
 // --- 2. ROUTE TERPROTEKSI (JWT) ---
-// Pastikan middleware 'jwt' sudah terdaftar di Kernel.php
 Route::middleware('jwt')->group(function () {
     
     // Profil & Logout
@@ -43,9 +43,17 @@ Route::middleware('jwt')->group(function () {
         Route::post('update', [OrganizationController::class, 'update']); 
     });
 
-    // Managemen Opportunities (Hanya Admin/User Login)
+    // Fitur Chat (Conversations & Messages)
+    Route::prefix('chats')->group(function () {
+        Route::get('/', [ChatController::class, 'getConversations']);
+        Route::post('/', [ChatController::class, 'startConversation']);
+        Route::get('{id}/messages', [ChatController::class, 'getMessages']);
+        Route::post('{id}/messages', [ChatController::class, 'sendMessage']);
+    });
+
+    // Managemen Opportunities
     Route::post('opportunities', [OpportunityController::class, 'store']);
-    Route::post('opportunities/{id}', [OpportunityController::class, 'update']); // Gunakan POST untuk update jika ada upload foto
+    Route::post('opportunities/{id}', [OpportunityController::class, 'update']);
     Route::delete('opportunities/{id}', [OpportunityController::class, 'destroy']);
 
     // Fitur Sosial
@@ -60,7 +68,7 @@ Route::middleware('jwt')->group(function () {
         Route::post('read-all', [NotificationController::class, 'markAllAsRead']);
     });
 
-    // Fitur Super Admin (Verifikasi)
+    // Fitur Super Admin
     Route::prefix('superadmin')->group(function () {
         Route::get('pending-admins', [AuthController::class, 'getPendingAdmins']);
         Route::post('verify-admin/{id}', [AuthController::class, 'approveAdmin']);
