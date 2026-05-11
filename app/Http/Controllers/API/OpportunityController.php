@@ -176,6 +176,7 @@ class OpportunityController extends Controller
 
             if ($like) {
                 $like->delete();
+                
                 // Ambil total like terbaru setelah didelete
                 $total = Like::where('opportunity_id', $id)->count();
                 
@@ -272,7 +273,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 9. Lain-lain
+     * 9. Status Like User
      */
     public function getLikeStatus($id)
     {
@@ -280,6 +281,9 @@ class OpportunityController extends Controller
         return response()->json(['success' => true, 'is_liked' => $isLiked]);
     }
 
+    /**
+     * 10. Ambil Semua Kategori
+     */
     public function getCategories()
     {
         return response()->json(['success' => true, 'data' => Category::all()]);
