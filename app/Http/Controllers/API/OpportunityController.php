@@ -160,7 +160,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 6. Fitur Like/Unlike + Notifikasi (Fixed Column Names)
+     * 6. Fitur Like/Unlike + Notifikasi (Nama Kolom Indo)
      */
     public function toggleLike($id)
     {
@@ -181,12 +181,12 @@ class OpportunityController extends Controller
 
             Like::create(['user_id' => $userId, 'opportunity_id' => $id]);
 
-            // Kirim Notifikasi ke Pemilik (Menggunakan kolom judul & isi)
+            // Kirim Notifikasi ke Pemilik
             if ($opportunity->created_by != $userId) {
                 Notification::create([
                     'user_id' => $opportunity->created_by,
                     'judul'   => 'Like Baru!',
-                    'isi'     => Auth::user()->name . ' menyukai lowongan Anda: ' . $opportunity->judul,
+                    'isi'     => Auth::user()->name . ' menyukai lowongan: ' . $opportunity->judul,
                     'is_read' => false
                 ]);
             }
@@ -198,7 +198,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 7. Simpan Komentar + Notifikasi (Fixed Column Names)
+     * 7. Simpan Komentar + Notifikasi (Nama Kolom Indo)
      */
     public function storeComment(Request $request, $id)
     {
@@ -221,12 +221,12 @@ class OpportunityController extends Controller
                 'parent_id'      => $request->parent_id
             ]);
 
-            // Kirim Notifikasi ke Pemilik (Menggunakan kolom judul & isi)
+            // Kirim Notifikasi ke Pemilik
             if ($opportunity->created_by != Auth::id()) {
                 Notification::create([
                     'user_id' => $opportunity->created_by,
                     'judul'   => 'Komentar Baru!',
-                    'isi'     => Auth::user()->name . ' berkomentar di lowongan Anda.',
+                    'isi'     => Auth::user()->name . ' berkomentar di lowongan: ' . $opportunity->judul,
                     'is_read' => false
                 ]);
             }
@@ -238,17 +238,21 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 8. Ambil Komentar
+     * 8. Ambil Komentar (DENGAN PAGINATION)
      */
     public function getComments($id)
     {
-        $comments = Comment::with(['user:id,name,foto_profil', 'replies.user:id,name,foto_profil'])
-            ->where('opportunity_id', $id)
-            ->whereNull('parent_id')
-            ->latest()
-            ->get();
+        try {
+            $comments = Comment::with(['user:id,name,foto_profil', 'replies.user:id,name,foto_profil'])
+                ->where('opportunity_id', $id)
+                ->whereNull('parent_id')
+                ->latest()
+                ->paginate(10); // Membatasi agar tidak berat/looping terus-menerus
 
-        return response()->json(['success' => true, 'data' => $comments]);
+            return response()->json(['success' => true, 'data' => $comments]);
+        } catch (Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Gagal load komentar', 'error' => $e->getMessage()], 500);
+        }
     }
 
     /**
