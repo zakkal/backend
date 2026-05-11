@@ -25,7 +25,12 @@ class OpportunityController extends Controller
             ->withCount(['likes', 'comments'])
             ->where('status', 'open')
             ->latest()
-            ->get();
+            ->get()
+            ->map(function ($item) {
+                // Menambahkan field 'total' agar sama dengan respon saat klik like
+                $item->total = $item->likes_count;
+                return $item;
+            });
 
         return response()->json(['success' => true, 'data' => $opportunities], 200);
     }
@@ -111,6 +116,9 @@ class OpportunityController extends Controller
             return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
         }
 
+        // Tambahkan field total agar Flutter langsung baca angka awal
+        $opportunity->total = $opportunity->likes_count;
+
         return response()->json(['success' => true, 'data' => $opportunity], 200);
     }
 
@@ -160,7 +168,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 6. Fitur Like/Unlike + Notifikasi + Total (Fix UI Flutter)
+     * 6. Fitur Like/Unlike (Kirim 'total' agar UI update)
      */
     public function toggleLike($id)
     {
@@ -176,21 +184,12 @@ class OpportunityController extends Controller
 
             if ($like) {
                 $like->delete();
-                
-                // Ambil total like terbaru setelah didelete
                 $total = Like::where('opportunity_id', $id)->count();
-                
-                return response()->json([
-                    'success' => true, 
-                    'message' => 'Unliked', 
-                    'is_liked' => false,
-                    'total' => $total
-                ]);
+                return response()->json(['success' => true, 'message' => 'Unliked', 'is_liked' => false, 'total' => $total]);
             }
 
             Like::create(['user_id' => $userId, 'opportunity_id' => $id]);
 
-            // Kirim Notifikasi ke Pemilik
             if ($opportunity->created_by != $userId) {
                 Notification::create([
                     'user_id' => $opportunity->created_by,
@@ -200,22 +199,15 @@ class OpportunityController extends Controller
                 ]);
             }
 
-            // Ambil total like terbaru setelah dicreate
             $total = Like::where('opportunity_id', $id)->count();
-
-            return response()->json([
-                'success' => true, 
-                'message' => 'Liked', 
-                'is_liked' => true,
-                'total' => $total
-            ], 201);
+            return response()->json(['success' => true, 'message' => 'Liked', 'is_liked' => true, 'total' => $total], 201);
         } catch (Exception $e) {
             return response()->json(['success' => false, 'message' => 'Server Error', 'error' => $e->getMessage()], 500);
         }
     }
 
     /**
-     * 7. Simpan Komentar + Notifikasi
+     * 7. Simpan Komentar
      */
     public function storeComment(Request $request, $id)
     {
@@ -230,7 +222,6 @@ class OpportunityController extends Controller
 
         try {
             $opportunity = Opportunity::findOrFail($id);
-
             $comment = Comment::create([
                 'user_id'        => Auth::id(),
                 'opportunity_id' => $id, 
@@ -238,7 +229,6 @@ class OpportunityController extends Controller
                 'parent_id'      => $request->parent_id
             ]);
 
-            // Kirim Notifikasi ke Pemilik
             if ($opportunity->created_by != Auth::id()) {
                 Notification::create([
                     'user_id' => $opportunity->created_by,
@@ -255,7 +245,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 8. Ambil Komentar (DENGAN PAGINATION)
+     * 8. Ambil Komentar (Paginate)
      */
     public function getComments($id)
     {
@@ -273,7 +263,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 9. Status Like User
+     * 9. Lain-lain
      */
     public function getLikeStatus($id)
     {
@@ -281,9 +271,6 @@ class OpportunityController extends Controller
         return response()->json(['success' => true, 'is_liked' => $isLiked]);
     }
 
-    /**
-     * 10. Ambil Semua Kategori
-     */
     public function getCategories()
     {
         return response()->json(['success' => true, 'data' => Category::all()]);
