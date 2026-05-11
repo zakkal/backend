@@ -160,7 +160,7 @@ class OpportunityController extends Controller
     }
 
     /**
-     * 6. Fitur Like/Unlike + Notifikasi (Nama Kolom Indo)
+     * 6. Fitur Like/Unlike + Notifikasi + Total (Fix UI Flutter)
      */
     public function toggleLike($id)
     {
@@ -176,7 +176,15 @@ class OpportunityController extends Controller
 
             if ($like) {
                 $like->delete();
-                return response()->json(['success' => true, 'message' => 'Unliked', 'is_liked' => false]);
+                // Ambil total like terbaru setelah didelete
+                $total = Like::where('opportunity_id', $id)->count();
+                
+                return response()->json([
+                    'success' => true, 
+                    'message' => 'Unliked', 
+                    'is_liked' => false,
+                    'total' => $total
+                ]);
             }
 
             Like::create(['user_id' => $userId, 'opportunity_id' => $id]);
@@ -191,14 +199,22 @@ class OpportunityController extends Controller
                 ]);
             }
 
-            return response()->json(['success' => true, 'message' => 'Liked', 'is_liked' => true], 201);
+            // Ambil total like terbaru setelah dicreate
+            $total = Like::where('opportunity_id', $id)->count();
+
+            return response()->json([
+                'success' => true, 
+                'message' => 'Liked', 
+                'is_liked' => true,
+                'total' => $total
+            ], 201);
         } catch (Exception $e) {
             return response()->json(['success' => false, 'message' => 'Server Error', 'error' => $e->getMessage()], 500);
         }
     }
 
     /**
-     * 7. Simpan Komentar + Notifikasi (Nama Kolom Indo)
+     * 7. Simpan Komentar + Notifikasi
      */
     public function storeComment(Request $request, $id)
     {
@@ -247,7 +263,7 @@ class OpportunityController extends Controller
                 ->where('opportunity_id', $id)
                 ->whereNull('parent_id')
                 ->latest()
-                ->paginate(10); // Membatasi agar tidak berat/looping terus-menerus
+                ->paginate(10);
 
             return response()->json(['success' => true, 'data' => $comments]);
         } catch (Exception $e) {
