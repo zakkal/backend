@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\User;
 use App\Models\Notification;
+use App\Models\Organization;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Tymon\JWTAuth\Facades\JWTAuth;
@@ -15,7 +16,7 @@ use Laravel\Socialite\Facades\Socialite;
 class AuthController extends Controller
 {
     /**
-     * Google Login (Sudah diperbaiki dengan stateless untuk Flutter)
+     * Google Login
      */
     public function googleLogin(Request $request)
     {
@@ -28,8 +29,6 @@ class AuthController extends Controller
         }
 
         try {
-            // PENTING: Tambahkan ->stateless() agar Socialite tidak mencari session/cookie
-            // Gunakan userFromToken untuk ID Token yang dikirim Flutter
             $googleUser = Socialite::driver('google')->stateless()->userFromToken($request->token);
 
             $user = User::where('email', $googleUser->getEmail())->first();
@@ -65,55 +64,40 @@ class AuthController extends Controller
             return response()->json([
                 'status'  => 'error',
                 'message' => 'Gagal autentikasi Google',
-                // Pesan error ini membantu debugging jika token salah/expired
                 'error'   => $e->getMessage()
             ], 401);
         }
     }
 
     /**
-     * Register Manual
+     * Register Manual (Sekarang defaultnya adalah Role: User)
      */
     public function register(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'name'     => 'required|string|max:255',
+            'name'     => 'required|string|max:255|unique:users',
             'email'    => 'required|email|unique:users',
             'password' => 'required|string|min:6|confirmed',
-            'role'     => 'required|in:admin,user',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['status' => 'error', 'errors' => $validator->errors()], 422);
         }
 
-        $isVerified = ($request->role === 'user') ? true : false;
-
+        // Semua registrasi baru defaultnya adalah user biasa
         $user = User::create([
             'name'        => $request->name,
             'username'    => explode('@', $request->email)[0] . rand(10, 99),
             'email'       => $request->email,
             'password'    => Hash::make($request->password),
-            'role'        => $request->role,
-            'is_verified' => $isVerified,
+            'role'        => 'user',
+            'is_verified' => true, // User biasa langsung aktif
         ]);
-
-        if ($user->role === 'admin') {
-            \App\Models\Organization::create([
-                'user_id' => $user->id,
-                'nama_organisasi' => 'Organisasi ' . $user->name,
-                'deskripsi' => 'Deskripsi organisasi baru.',
-            ]);
-        }
-
-        $message = ($user->role === 'admin')
-            ? 'Registrasi Admin berhasil. Mohon tunggu verifikasi Programmer.'
-            : 'Registrasi User berhasil. Silahkan login.';
 
         return response()->json([
             'status'  => 'success',
-            'message' => $message,
-            'data'    => $user->load('organization')
+            'message' => 'Registrasi berhasil. Silahkan login.',
+            'data'    => $user
         ], 201);
     }
 
@@ -134,13 +118,8 @@ class AuthController extends Controller
 
             $user = auth()->user();
 
-            if ($user->role === 'admin' && !$user->is_verified) {
-                JWTAuth::invalidate($token);
-                return response()->json([
-                    'status'  => 'error',
-                    'message' => 'Akun Admin Anda belum diverifikasi oleh Programmer.'
-                ], 403);
-            }
+            // Jika user sedang menunggu verifikasi upgrade (misal kamu tambah status is_verified di tabel users)
+            // Tapi untuk sekarang kita asumsikan user bisa login meski belum diverifikasi organisasinya
         } catch (JWTException $e) {
             return response()->json([
                 'status'  => 'error',
@@ -160,7 +139,7 @@ class AuthController extends Controller
     }
 
     /**
-     * Admin Approval & Pending List
+     * Get Pending Upgrades (Untuk Super Admin melihat siapa yang request jadi premium)
      */
     public function getPendingAdmins()
     {
@@ -168,16 +147,20 @@ class AuthController extends Controller
             return response()->json(['message' => 'Akses ditolak!'], 403);
         }
 
-        $pending = User::where('role', 'admin')->where('is_verified', false)->get();
+        // Cari user yang sudah isi organization_id tapi rolenya masih 'user'
+        $pending = User::with('organization')
+            ->where('role', 'user')
+            ->whereNotNull('organization_id')
+            ->get();
+
         return response()->json(['status' => 'success', 'data' => $pending]);
     }
 
+    /**
+     * Approve Upgrade (User -> Admin)
+     */
     public function approveAdmin($id)
     {
-        if (!auth()->check()) {
-            return response()->json(['message' => 'Silahkan login terlebih dahulu'], 401);
-        }
-
         if (auth()->user()->role !== 'super_admin') {
             return response()->json(['message' => 'Akses ditolak! Anda bukan Super Admin'], 403);
         }
@@ -185,20 +168,30 @@ class AuthController extends Controller
         $user = User::find($id);
         if (!$user) return response()->json(['message' => 'User tidak ditemukan'], 404);
 
-        $user->update(['is_verified' => true]);
+        // 1. Upgrade Role & Verifikasi User
+        $user->update([
+            'role' => 'admin',
+            'is_verified' => true
+        ]);
 
+        // 2. Verifikasi Organisasinya juga
+        if ($user->organization_id) {
+            Organization::where('id', $user->organization_id)->update([
+                'is_verified' => true
+            ]);
+        }
+
+        // 3. Kirim Notifikasi
         try {
             Notification::create([
                 'user_id' => $user->id,
-                'judul'   => 'Akun Diverifikasi',
-                'isi'     => 'Selamat! Akun organisasi kamu telah aktif.',
+                'judul'   => 'Upgrade Premium Berhasil',
+                'isi'     => 'Selamat! Akun Anda kini menjadi Admin dan organisasi Anda telah aktif.',
                 'is_read' => false
             ]);
-        } catch (\Exception $e) {
-            // Log error jika diperlukan
-        }
+        } catch (\Exception $e) { }
 
-        return response()->json(['status' => 'success', 'message' => "Akun {$user->name} aktif!"]);
+        return response()->json(['status' => 'success', 'message' => "User {$user->name} sekarang menjadi Admin!"]);
     }
 
     /**
@@ -206,10 +199,6 @@ class AuthController extends Controller
      */
     public function getNotifications()
     {
-        if (!auth()->check()) {
-            return response()->json(['message' => 'Unauthorized'], 401);
-        }
-
         $notifications = Notification::where('user_id', auth()->id())
             ->orderBy('created_at', 'desc')
             ->get();
@@ -220,9 +209,6 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * Auth Helpers
-     */
     public function logout()
     {
         JWTAuth::invalidate(JWTAuth::getToken());
@@ -231,7 +217,7 @@ class AuthController extends Controller
 
     public function me()
     {
-        return response()->json(['status' => 'success', 'data' => auth()->user()]);
+        return response()->json(['status' => 'success', 'data' => auth()->user()->load('organization')]);
     }
 
     protected function respondWithToken($token)

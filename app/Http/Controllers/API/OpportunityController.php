@@ -277,7 +277,7 @@ class OpportunityController extends Controller
         'success' => true, 
         'is_liked' => $isLiked,
         'total' => $total // Sekarang $total tidak akan merah lagi
-    ]);
+    ]); 
 }
 
     public function getCategories()

@@ -9,25 +9,35 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
+use Exception;
 
 class OrganizationController extends Controller
 {
     /**
-     * 1. INDEX: Menampilkan semua daftar organisasi (Public/Admin)
+     * 1. INDEX: List semua organisasi
+     * Bisa digunakan Super Admin untuk melihat yang belum diverifikasi
      */
-    public function index()
+    public function index(Request $request)
     {
-        $organizations = Organization::latest()->get();
+        $query = Organization::query();
+
+        // Filter jika ingin melihat yang belum diverifikasi saja (untuk Super Admin)
+        if ($request->has('pending')) {
+            $query->where('is_verified', 0);
+        }
+
+        $organizations = $query->latest()->get();
         
         return response()->json([
-            'status' => 'success',
+            'success' => true,
             'data' => $organizations
         ], 200);
     }
 
     /**
-     * 2. STORE: Membuat organisasi baru (Create)
-     * Biasanya dipanggil saat user mendaftar sebagai admin organisasi
+     * 2. STORE (Upgrade Premium): Membuat organisasi baru
+     * User mengisi form ini untuk request menjadi Admin/Premium
      */
     public function store(Request $request)
     {
@@ -40,74 +50,96 @@ class OrganizationController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json($validator->errors(), 422);
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        $user = auth()->user();
+        $user = Auth::user();
 
-        // Cek jika user sudah punya organisasi sebelumnya
-        if (Organization::where('user_id', $user->id)->exists()) {
-            return response()->json(['message' => 'User sudah memiliki organisasi'], 400);
+        // Cek jika user sudah dalam proses upgrade atau sudah punya organisasi
+        if ($user->organization_id != null) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Anda sudah memiliki organisasi atau sedang dalam proses verifikasi'
+            ], 400);
         }
 
-        $path = null;
-        if ($request->hasFile('logo')) {
-            $path = $request->file('logo')->store('logos', 'public');
+        try {
+            $path = null;
+            if ($request->hasFile('logo')) {
+                $path = $request->file('logo')->store('logos', 'public');
+            }
+
+            $organization = DB::transaction(function () use ($request, $user, $path) {
+                // Buat data Organisasi dengan status is_verified = 0
+                $org = Organization::create([
+                    'user_id'         => $user->id,
+                    'nama_organisasi' => $request->nama_organisasi,
+                    'deskripsi'       => $request->deskripsi,
+                    'alamat'          => $request->alamat,
+                    'website'         => $request->website,
+                    'logo'            => $path,
+                    'is_verified'     => 0, // Default: Menunggu verifikasi Super Admin
+                ]);
+
+                // Update organization_id di user, tapi ROLE tetap 'user' sampai diverifikasi
+                $user->update([
+                    'organization_id' => $org->id
+                ]);
+
+                return $org;
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Permintaan upgrade berhasil dikirim. Menunggu verifikasi Super Admin.',
+                'data' => $organization
+            ], 201);
+
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Gagal mengajukan upgrade organisasi',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        // Gunakan Transaction agar data User & Organization sinkron
-        $organization = DB::transaction(function () use ($request, $user, $path) {
-            $org = Organization::create([
-                'user_id' => $user->id,
-                'nama_organisasi' => $request->nama_organisasi,
-                'deskripsi' => $request->deskripsi,
-                'alamat' => $request->alamat,
-                'website' => $request->website,
-                'logo' => $path,
-            ]);
-
-            // Update kolom organization_id di tabel users agar sinkron
-            $user->update(['organization_id' => $org->id]);
-
-            return $org;
-        });
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Organisasi berhasil didaftarkan',
-            'data' => $organization
-        ], 201);
     }
 
     /**
-     * 3. SHOW: Menampilkan profil organisasi milik user login (Read)
+     * 3. SHOW: Profil organisasi milik user login
      */
     public function show()
     {
-        $user = auth()->user();
-        $organization = Organization::where('user_id', $user->id)->first();
+        $user = Auth::user();
+        
+        $organization = Organization::where('id', $user->organization_id)->first();
 
         if (!$organization) {
-            return response()->json(['status' => 'error', 'message' => 'Organisasi tidak ditemukan'], 404);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Anda belum memiliki profil organisasi'
+            ], 404);
         }
 
-        return response()->json(['status' => 'success', 'data' => $organization]);
+        return response()->json([
+            'success' => true, 
+            'data' => $organization
+        ]);
     }
 
     /**
-     * 4. UPDATE: Memperbarui data organisasi (Update)
+     * 4. UPDATE: Edit data organisasi (Hanya bisa jika sudah diverifikasi/Admin)
      */
     public function update(Request $request)
     {
-        $user = auth()->user();
-        $organization = Organization::where('user_id', $user->id)->first();
+        $user = Auth::user();
+        $organization = Organization::where('id', $user->organization_id)->first();
 
         if (!$organization) {
-            return response()->json(['message' => 'Akses ditolak'], 403);
+            return response()->json(['success' => false, 'message' => 'Organisasi tidak ditemukan'], 404);
         }
 
         $validator = Validator::make($request->all(), [
-            'nama_organisasi' => 'required|string|max:255',
+            'nama_organisasi' => 'required|string|max:255|unique:organizations,nama_organisasi,'.$organization->id,
             'deskripsi'       => 'nullable|string',
             'alamat'          => 'nullable|string',
             'website'         => 'nullable|url',
@@ -115,52 +147,62 @@ class OrganizationController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json($validator->errors(), 422);
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        $data = $request->only(['nama_organisasi', 'deskripsi', 'alamat', 'website']);
+        try {
+            $data = $request->only(['nama_organisasi', 'deskripsi', 'alamat', 'website']);
 
-        if ($request->hasFile('logo')) {
-            if ($organization->logo) {
-                Storage::disk('public')->delete($organization->logo);
+            if ($request->hasFile('logo')) {
+                if ($organization->logo) {
+                    Storage::disk('public')->delete($organization->logo);
+                }
+                $data['logo'] = $request->file('logo')->store('logos', 'public');
             }
-            $data['logo'] = $request->file('logo')->store('logos', 'public');
+
+            $organization->update($data);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Profil organisasi berhasil diperbarui',
+                'data' => $organization
+            ]);
+        } catch (Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
-
-        $organization->update($data);
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Profil organisasi berhasil diperbarui',
-            'data' => $organization
-        ]);
     }
 
     /**
-     * 5. DESTROY: Menghapus organisasi (Delete)
+     * 5. DESTROY: Hapus organisasi
      */
     public function destroy()
     {
-        $user = auth()->user();
-        $organization = Organization::where('user_id', $user->id)->first();
+        $user = Auth::user();
+        $organization = Organization::where('id', $user->organization_id)->first();
 
         if (!$organization) {
-            return response()->json(['message' => 'Organisasi tidak ditemukan'], 404);
+            return response()->json(['success' => false, 'message' => 'Organisasi tidak ditemukan'], 404);
         }
 
-        // Hapus logo dari storage
-        if ($organization->logo) {
-            Storage::disk('public')->delete($organization->logo);
+        try {
+            if ($organization->logo) {
+                Storage::disk('public')->delete($organization->logo);
+            }
+
+            // Putuskan hubungan di tabel users dan kembalikan role ke user biasa
+            User::where('organization_id', $organization->id)->update([
+                'organization_id' => null,
+                'role' => 'user'
+            ]);
+
+            $organization->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Organisasi berhasil dihapus dan akun Anda kembali menjadi user biasa'
+            ]);
+        } catch (Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
-
-        // Hapus link organization_id di user (opsional)
-        $user->update(['organization_id' => null]);
-
-        $organization->delete();
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Organisasi berhasil dihapus'
-        ]);
     }
 }

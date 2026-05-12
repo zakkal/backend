@@ -24,7 +24,7 @@ return new class extends Migration
         $table->string('lokasi')->nullable();
         $table->rememberToken();
         $table->timestamps();
-        
+        $table->string('foto_profil')->nullable(); // TAMBAHKAN BARIS INI
     });
 
         Schema::create('password_reset_tokens', function (Blueprint $table) {

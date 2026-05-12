@@ -6,7 +6,7 @@ use App\Http\Controllers\API\ProductController;
 use App\Http\Controllers\API\OrganizationController;
 use App\Http\Controllers\API\OpportunityController;
 use App\Http\Controllers\API\NotificationController;
-use App\Http\Controllers\API\ChatController; // Tambahan Import
+use App\Http\Controllers\API\ChatController;
 
 /*
 |--------------------------------------------------------------------------
@@ -21,11 +21,12 @@ Route::prefix('auth')->group(function () {
     Route::post('google', [AuthController::class, 'googleLogin']);
 });
 
-// Lowongan (Akses Publik)
+// Lowongan & Organisasi (Akses Publik)
 Route::get('opportunities', [OpportunityController::class, 'index']);
 Route::get('opportunities/{id}', [OpportunityController::class, 'show']);
 Route::get('opportunities/{id}/comments', [OpportunityController::class, 'getComments']);
 Route::get('categories', [OpportunityController::class, 'getCategories']);
+Route::get('organizations', [OrganizationController::class, 'index']); // Melihat semua organisasi
 
 
 // --- 2. ROUTE TERPROTEKSI (JWT) ---
@@ -37,13 +38,15 @@ Route::middleware('jwt')->group(function () {
         Route::get('me', [AuthController::class, 'me']);
     });
     
-    // Profil Organisasi
+    // Management Organisasi (Sesuai Controller Baru)
     Route::prefix('organization')->group(function () {
-        Route::get('/', [OrganizationController::class, 'show']);
-        Route::post('update', [OrganizationController::class, 'update']); 
+        Route::get('/', [OrganizationController::class, 'show']);      // Cek profil org sendiri
+        Route::post('/', [OrganizationController::class, 'store']);     // 🔥 BARU: Daftar organisasi
+        Route::post('update', [OrganizationController::class, 'update']); // Update profil org
+        Route::delete('/', [OrganizationController::class, 'destroy']); // Hapus organisasi
     });
 
-    // Fitur Chat (Conversations & Messages)
+    // Fitur Chat
     Route::prefix('chats')->group(function () {
         Route::get('/', [ChatController::class, 'getConversations']);
         Route::post('/', [ChatController::class, 'startConversation']);
@@ -52,14 +55,16 @@ Route::middleware('jwt')->group(function () {
     });
 
     // Managemen Opportunities
-    Route::post('opportunities', [OpportunityController::class, 'store']);
-    Route::post('opportunities/{id}', [OpportunityController::class, 'update']);
-    Route::delete('opportunities/{id}', [OpportunityController::class, 'destroy']);
-
-    // Fitur Sosial
-    Route::get('opportunities/{id}/likes', [OpportunityController::class, 'getLikeStatus']);
-    Route::post('opportunities/{id}/like', [OpportunityController::class, 'toggleLike']);
-    Route::post('opportunities/{id}/comments', [OpportunityController::class, 'storeComment']);
+    Route::prefix('opportunities')->group(function () {
+        Route::post('/', [OpportunityController::class, 'store']);
+        Route::post('{id}', [OpportunityController::class, 'update']);
+        Route::delete('{id}', [OpportunityController::class, 'destroy']);
+        
+        // Fitur Sosial (Like & Comment)
+        Route::get('{id}/likes', [OpportunityController::class, 'getLikeStatus']);
+        Route::post('{id}/like', [OpportunityController::class, 'toggleLike']);
+        Route::post('{id}/comments', [OpportunityController::class, 'storeComment']);
+    });
 
     // Notifikasi
     Route::prefix('notifications')->group(function () {
