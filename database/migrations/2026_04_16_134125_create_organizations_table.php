@@ -12,15 +12,20 @@ return new class extends Migration
     public function up(): void
     {
        Schema::create('organizations', function (Blueprint $table) {
-    $table->id();
-    $table->foreignId('user_id')->unique()->constrained('users')->onDelete('cascade');
-    $table->string('nama_organisasi');
-    $table->text('deskripsi')->nullable();
-    $table->string('alamat')->nullable();
-    $table->string('website')->nullable();
-    $table->string('logo')->nullable();
-    $table->timestamps();
-});
+            $table->id();
+            $table->foreignId('user_id')->unique()->constrained('users')->onDelete('cascade');
+            $table->string('nama_organisasi');
+            $table->text('deskripsi')->nullable();
+            $table->string('alamat')->nullable();
+            $table->string('website')->nullable();
+            $table->string('logo')->nullable();
+            
+            // --- TAMBAHKAN BARIS INI ---
+            $table->boolean('is_verified')->default(false); 
+            // ---------------------------
+
+            $table->timestamps();
+        });
     }
 
     /**

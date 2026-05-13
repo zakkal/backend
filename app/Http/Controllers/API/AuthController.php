@@ -70,7 +70,7 @@ class AuthController extends Controller
     }
 
     /**
-     * Register Manual (Sekarang defaultnya adalah Role: User)
+     * Register Manual
      */
     public function register(Request $request)
     {
@@ -84,14 +84,13 @@ class AuthController extends Controller
             return response()->json(['status' => 'error', 'errors' => $validator->errors()], 422);
         }
 
-        // Semua registrasi baru defaultnya adalah user biasa
         $user = User::create([
             'name'        => $request->name,
             'username'    => explode('@', $request->email)[0] . rand(10, 99),
             'email'       => $request->email,
             'password'    => Hash::make($request->password),
             'role'        => 'user',
-            'is_verified' => true, // User biasa langsung aktif
+            'is_verified' => true,
         ]);
 
         return response()->json([
@@ -117,9 +116,6 @@ class AuthController extends Controller
             }
 
             $user = auth()->user();
-
-            // Jika user sedang menunggu verifikasi upgrade (misal kamu tambah status is_verified di tabel users)
-            // Tapi untuk sekarang kita asumsikan user bisa login meski belum diverifikasi organisasinya
         } catch (JWTException $e) {
             return response()->json([
                 'status'  => 'error',
@@ -139,61 +135,131 @@ class AuthController extends Controller
     }
 
     /**
-     * Get Pending Upgrades (Untuk Super Admin melihat siapa yang request jadi premium)
+     * FITUR BARU: Request Upgrade (User mengisi form organisasi)
      */
-    public function getPendingAdmins()
+    public function requestUpgrade(Request $request)
     {
-        if (auth()->user()->role !== 'super_admin') {
-            return response()->json(['message' => 'Akses ditolak!'], 403);
+        $user = auth()->user();
+
+        // Cek apakah user sudah pernah mengajukan upgrade
+        if ($user->organization_id != null) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Anda sudah mengajukan upgrade atau sudah memiliki organisasi.'
+            ], 400);
         }
 
-        // Cari user yang sudah isi organization_id tapi rolenya masih 'user'
-        $pending = User::with('organization')
-            ->where('role', 'user')
-            ->whereNotNull('organization_id')
-            ->get();
+        $validator = Validator::make($request->all(), [
+            'nama_organisasi' => 'required|string|max:255',
+            'deskripsi'       => 'required|string',
+            'lokasi'          => 'nullable|string',
+            'website'         => 'nullable|url',
+        ]);
 
-        return response()->json(['status' => 'success', 'data' => $pending]);
+        if ($validator->fails()) {
+            return response()->json(['status' => 'error', 'errors' => $validator->errors()], 422);
+        }
+
+        // 1. Buat data organisasi (is_verified default false)
+        $organization = Organization::create([
+            'nama_organisasi' => $request->nama_organisasi,
+            'deskripsi'       => $request->deskripsi,
+            'lokasi'          => $request->lokasi,
+            'website'         => $request->website,
+            'is_verified'     => false, 
+        ]);
+
+        // 2. Hubungkan User dengan Organisasi tersebut
+        $user->update([
+            'organization_id' => $organization->id
+        ]);
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Permintaan upgrade berhasil dikirim. Mohon tunggu verifikasi Super Admin.',
+            'data'    => $user->load('organization')
+        ]);
     }
 
     /**
-     * Approve Upgrade (User -> Admin)
+     * Get Pending Upgrades (Untuk Super Admin)
      */
-    public function approveAdmin($id)
-    {
-        if (auth()->user()->role !== 'super_admin') {
-            return response()->json(['message' => 'Akses ditolak! Anda bukan Super Admin'], 403);
-        }
+    public function getPendingAdmins()
+{
+    // Ambil user yang punya organization_id tapi role-nya masih 'user'
+    $pendingUsers = User::with('organization')
+        ->whereNotNull('organization_id')
+        ->where('role', 'user')
+        ->get();
 
-        $user = User::find($id);
-        if (!$user) return response()->json(['message' => 'User tidak ditemukan'], 404);
-
-        // 1. Upgrade Role & Verifikasi User
-        $user->update([
-            'role' => 'admin',
-            'is_verified' => true
-        ]);
-
-        // 2. Verifikasi Organisasinya juga
-        if ($user->organization_id) {
-            Organization::where('id', $user->organization_id)->update([
-                'is_verified' => true
-            ]);
-        }
-
-        // 3. Kirim Notifikasi
-        try {
-            Notification::create([
-                'user_id' => $user->id,
-                'judul'   => 'Upgrade Premium Berhasil',
-                'isi'     => 'Selamat! Akun Anda kini menjadi Admin dan organisasi Anda telah aktif.',
-                'is_read' => false
-            ]);
-        } catch (\Exception $e) { }
-
-        return response()->json(['status' => 'success', 'message' => "User {$user->name} sekarang menjadi Admin!"]);
+    // Cek jika data kosong
+    if ($pendingUsers->isEmpty()) {
+        return response()->json([
+            'success' => true,
+            'message' => 'Saat ini tidak ada permintaan verifikasi admin baru.',
+            'data' => []
+        ], 200);
     }
 
+    // Jika ada datanya
+    return response()->json([
+        'success' => true,
+        'message' => 'Daftar permintaan verifikasi admin berhasil diambil.',
+        'count' => $pendingUsers->count(),
+        'data' => $pendingUsers
+    ], 200);
+}
+    /**
+     * Approve Upgrade (Super Admin menyetujui)
+     */
+    public function approveAdmin($id)
+{
+    // 1. Cek apakah yang akses adalah Super Admin
+    if (auth()->user()->role !== 'super_admin') {
+        return response()->json(['message' => 'Akses ditolak! Anda bukan Super Admin'], 403);
+    }
+
+    $user = User::find($id);
+    
+    // 2. Cek apakah user ada
+    if (!$user) {
+        return response()->json(['message' => 'User tidak ditemukan'], 404);
+    }
+
+    // 3. PROTEKSI: Cek apakah user sudah mengisi data organisasi
+    if ($user->organization_id === null) {
+        return response()->json([
+            'status'  => 'error',
+            'message' => 'Gagal verifikasi! User ini belum mengajukan upgrade atau belum mengisi data organisasi.'
+        ], 400);
+    }
+
+    // 4. Jalankan Upgrade Role & Verifikasi User
+    $user->update([
+        'role' => 'admin',
+        'is_verified' => true
+    ]);
+
+    // 5. Verifikasi Organisasinya
+    Organization::where('id', $user->organization_id)->update([
+        'is_verified' => true
+    ]);
+
+    // 6. Kirim Notifikasi
+    try {
+        Notification::create([
+            'user_id' => $user->id,
+            'judul'   => 'Upgrade Premium Berhasil',
+            'isi'     => 'Selamat! Akun Anda kini menjadi Admin dan organisasi Anda telah aktif.',
+            'is_read' => false
+        ]);
+    } catch (\Exception $e) { }
+
+    return response()->json([
+        'status'  => 'success', 
+        'message' => "User {$user->name} sekarang resmi menjadi Admin!"
+    ]);
+}
     /**
      * Ambil Notifikasi
      */
